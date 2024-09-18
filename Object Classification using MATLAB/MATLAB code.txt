@@ -1,0 +1,175 @@
+classdef app2 < matlab.apps.AppBase
+    % Properties that correspond to app components
+    properties (Access = public)
+        UIFigure     matlab.ui.Figure
+        TestButton   matlab.ui.control.Button
+        TrainButton  matlab.ui.control.Button
+    end
+    % Callbacks that handle component events
+    methods (Access = private)
+        % Button pushed function: TrainButton
+        function TrainButtonPushed(app, event)
+            trainDataPath ='/MATLAB Drive/train 2' ;
+%testDataPath = '/MATLAB Drive/Examples/New Folder2';
+% Set the number of training samples
+%numTrainSamples = 12;
+% Define the desired size of input images
+imageHeight = 200;
+imageWidth = 200;
+numChannels = 3; 
+% Update to 3 for RGB images
+inputSize = [imageHeight, imageWidth, numChannels];
+% Create imageDatastore for training data
+trainData = imageDatastore(trainDataPath, 'IncludeSubfolders', true, 'LabelSource', 'foldernames');
+% Check if any labels have fewer samples than desired
+%minNumSamples = min(countEachLabel(trainData).Count);
+ %if numTrainSamples > minNumSamples
+  %   error('The number of desired training samples exceeds the available samples in one or more labels.');
+%end
+[trainData, validationData,testData] = splitEachLabel(trainData,0.6,0.3,"randomized");
+disp(validationData);
+% Create imageDatastore for test data
+%testData = imageDatastore(, 'IncludeSubfolders', true, 'LabelSource', 'foldernames');
+%disp(testData);
+% Check and align the categories (labels) of training and validation data
+trainCategories = categories(trainData.Labels);
+validationCategories = categories(validationData.Labels);
+testDataCategories=testData.Labels;
+if ~isequal(trainCategories, validationCategories)
+    error('Training and validation data have different categories. Ensure consistency in labels.');
+end
+% Resize and preprocess the input images
+trainData = augmentedImageDatastore(inputSize(1:2), trainData, 'ColorPreprocessing', 'gray2rgb');
+validationData = augmentedImageDatastore(inputSize(1:2), validationData, 'ColorPreprocessing', 'gray2rgb');
+testData = augmentedImageDatastore(inputSize(1:2), testData, 'ColorPreprocessing', 'gray2rgb');
+disp(testData);
+% Define the layers of the CNN
+layers = [
+    imageInputLayer(inputSize)
+    convolution2dLayer(3, 8, 'Padding', 'same', 'Name', 'Conv_1')
+    batchNormalizationLayer('Name', 'BN_1')
+    reluLayer('Name', 'Relu_1')
+    maxPooling2dLayer(2, 'Stride', 2, 'Name', 'MaxPool_1')
+    convolution2dLayer(3, 16, 'Padding', 'same', 'Name', 'Conv_2')
+    batchNormalizationLayer('Name', 'BN_2')
+    reluLayer('Name', 'Relu_2')
+    maxPooling2dLayer(2, 'Stride', 2, 'Name', 'MaxPool_2')
+    convolution2dLayer(2, 32, 'Padding', 'same', 'Name', 'Conv_3')
+    batchNormalizationLayer('Name', 'BN_3')
+    reluLayer('Name', 'Relu_3')
+    maxPooling2dLayer(2, 'Stride', 2, 'Name', 'MaxPool_3')
+    convolution2dLayer(3, 64, 'Padding', 'same', 'Name', 'Conv_4')
+    batchNormalizationLayer('Name', 'BN_4')
+    reluLayer('Name', 'Relu_4')
+    maxPooling2dLayer(2, 'Stride', 2, 'Name', 'MaxPool_4')
+    convolution2dLayer(3, 128, 'Padding', 'same', 'Name', 'Conv_5')
+    batchNormalizationLayer('Name', 'BN_5')
+    reluLayer('Name', 'Relu_5')
+    fullyConnectedLayer(3, 'Name', 'FC')
+    softmaxLayer('Name', 'SoftMax')
+    classificationLayer('Name', 'Output Classification')
+];
+% Set training options
+options = trainingOptions('sgdm', 'InitialLearnRate', 0.0001, 'MaxEpochs', 50, 'Shuffle', 'every-epoch', 'ValidationData', validationData, 'ValidationFrequency', 30, 'Verbose', false, 'Plots', 'training-progress');
+% Train the network
+nenet = trainNetwork(trainData, layers, options);
+% Evaluate the CNN on test data
+save('trainedNetwork.mat', 'nenet');
+YPred = classify(nenet, testData); disp(YPred);
+YValidation = testDataCategories;
+disp(sum(YPred==YValidation));
+disp(numel(YValidation));
+accuracy = sum(YPred == YValidation) / numel(YValidation);
+fprintf('Accuracy: %.2f%%\n', accuracy * 100);
+        end
+function TestButtonPushed(app, event)
+            [fileName, pathName] = uigetfile({'*.jpg;*.png;*.jpeg', 'Image Files (*.jpg, *.png, *.jpeg)'}, 'Select an Image');
+if fileName ~= 0
+    % Read the selected image
+    imagePath = fullfile(pathName, fileName);
+    I = imread(imagePath);
+    load('trainedNetwork.mat', 'nenet')
+    
+    I1=I;
+    % Create a temporary file to save the image
+    [~, ~, fileExt] = fileparts(fileName);
+    tempFilePath = tempname;
+    tempImagePath = [tempFilePath, fileExt];
+    imwrite(I, tempImagePath);
+    % Create imageDatastore from the temporary file
+    ds = imageDatastore(tempImagePath);
+    
+    % Loop through the images in the datastore
+    while hasdata(ds)
+        I = read(ds);
+        ganesh = nenet();
+       imshow(I);
+        I = imresize3(I, [200 200 3]);
+        pred1 = classify(ganesh, I);
+        
+        % Display the recognized object and scores
+       
+        
+        [pred,scores] = classify(ganesh,I);
+        highscores = scores > 0.5;
+             if(scores(highscores))
+             
+            title(['Recognized Object is ' char(pred1)]);
+            disp(char(pred1));
+        else
+            disp('Not recognized');
+             end
+             figure
+        bar(scores);
+        
+       
+    end
+    
+    % Delete the temporary file
+    delete(tempImagePath);
+    close(app.UIFigure);
+end
+        
+        end
+    end
+    % Component initialization
+    methods (Access = private)
+        % Create UIFigure and components
+        function createComponents(app)
+            % Create UIFigure and hide until all components are created
+            app.UIFigure = uifigure('Visible', 'off');
+            app.UIFigure.Position = [100 100 640 480];
+            app.UIFigure.Name = 'MATLAB App';
+            % Create TrainButton
+            app.TrainButton = uibutton(app.UIFigure, 'push');
+            app.TrainButton.ButtonPushedFcn = createCallbackFcn(app, @TrainButtonPushed, true);
+app.TrainButton.Position = [271 368 100 23];
+            app.TrainButton.Text = 'Train';
+            % Create TestButton
+            app.TestButton = uibutton(app.UIFigure, 'push');
+            app.TestButton.ButtonPushedFcn = createCallbackFcn(app, @TestButtonPushed, true);
+            app.TestButton.Position = [271 250 100 23];
+            app.TestButton.Text = 'Test';
+            % Show the figure after all components are created
+            app.UIFigure.Visible = 'on';
+        end
+    end
+    % App creation and deletion
+    methods (Access = public)
+        % Construct app
+        function app = app2
+            % Create UIFigure and components
+            createComponents(app)
+            % Register the app with App Designer
+            registerApp(app, app.UIFigure)
+            if nargout == 0
+                clear app
+            end
+        end
+        % Code that executes before app deletion
+        function delete(app)
+            % Delete UIFigure when app is deleted
+            delete(app.UIFigure)
+        end
+    end
+end
